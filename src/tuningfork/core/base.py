@@ -490,13 +490,46 @@ class AsyncComponent(ConfigurableComponent[T]):
         """
         pass
     
-    async def _async_cleanup(self) -> None:
-        """Perform async cleanup work.
+    async def cleanup(self) -> None:
+        """Clean up component resources asynchronously.
         
-        Subclasses can override this method to perform their
-        specific cleanup tasks.
+        This method ensures thread-safe cleanup and prevents
+        multiple concurrent cleanup attempts.
         """
-        pass
+        async with self._cleanup_lock:
+            if not self._initialized:
+                return
+            
+            try:
+                self._logger.info("Cleaning up component", component=self.component_name)
+            except Exception:
+                pass
+            
+            try:
+                await self._async_cleanup()
+                
+                try:
+                    self._logger.info(
+                        "Component cleaned up successfully",
+                        component=self.component_name,
+                    )
+                except Exception:
+                    pass
+                
+            except Exception as e:
+                try:
+                    self._logger.error(
+                        "Component cleanup failed",
+                        component=self.component_name,
+                        error=str(e),
+                    )
+                except Exception:
+                    pass
+                # Don't raise during cleanup to avoid masking original errors
+            finally:
+                # Always mark as not initialized, even if cleanup fails
+                # This ensures the component is in a consistent state
+                self._initialized = False
     
     @asynccontextmanager
     async def managed_lifecycle(self) -> AsyncGenerator["AsyncComponent[T]", None]:

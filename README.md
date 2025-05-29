@@ -63,7 +63,7 @@ This repository contains **Phase 1: Foundation Layer** - the core infrastructure
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/rob-stevens-dev/TuningFork.git
 cd tuningfork
 
 # Create virtual environment

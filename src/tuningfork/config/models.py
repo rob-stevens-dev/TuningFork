@@ -31,7 +31,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from pydantic import BaseModel, Field, SecretStr, validator, root_validator
+from pydantic import BaseModel, Field, SecretStr, field_validator, model_validator, ConfigDict
 from pydantic import AnyUrl, EmailStr, PositiveInt, conint, constr
 
 from ..core.exceptions import ValidationError
@@ -50,35 +50,31 @@ class BaseConfig(BaseModel):
         ...     value: int = 42
     """
     
-    class Config:
-        # Pydantic configuration
-        validate_assignment = True
-        extra = "forbid"
-        use_enum_values = True
-        validate_all = True
-        allow_population_by_field_name = True
-        
-        # JSON serialization
-        json_encoders = {
-            SecretStr: lambda v: v.get_secret_value() if v else None,
-            Path: str,
-            datetime: lambda v: v.isoformat(),
-            timedelta: lambda v: v.total_seconds(),
-        }
+    model_config = ConfigDict(
+        validate_assignment=True,
+        extra="forbid",
+        use_enum_values=True,
+        validate_default=True,
+        str_to_lower=False,
+        str_strip_whitespace=True,
+    )
     
-    @root_validator(pre=True)
+    @model_validator(mode='before')
     @classmethod
-    def resolve_environment_variables(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+    def resolve_environment_variables(cls, data: Any) -> Any:
         """Resolve environment variables in configuration values.
         
         Supports ${VAR_NAME} and ${VAR_NAME:default_value} syntax.
         
         Args:
-            values: Configuration values
+            data: Configuration values
             
         Returns:
             Values with environment variables resolved
         """
+        if not isinstance(data, dict):
+            return data
+            
         def resolve_value(value: Any) -> Any:
             if isinstance(value, str):
                 # Handle ${VAR_NAME} and ${VAR_NAME:default} patterns
@@ -101,7 +97,7 @@ class BaseConfig(BaseModel):
             else:
                 return value
         
-        return {key: resolve_value(value) for key, value in values.items()}
+        return {key: resolve_value(value) for key, value in data.items()}
     
     def to_dict(self, *, mask_secrets: bool = True) -> Dict[str, Any]:
         """Convert configuration to dictionary.
@@ -112,7 +108,7 @@ class BaseConfig(BaseModel):
         Returns:
             Dictionary representation of configuration
         """
-        data = self.dict()
+        data = self.model_dump()
         
         if mask_secrets:
             def mask_value(value: Any) -> Any:
@@ -138,7 +134,7 @@ class BaseConfig(BaseModel):
         Returns:
             New configuration instance with updated values
         """
-        current_data = self.dict()
+        current_data = self.model_dump()
         current_data.update(data)
         return self.__class__(**current_data)
 
@@ -166,7 +162,7 @@ class SSLConfig(BaseConfig):
     )
     check_hostname: bool = Field(True, description="Verify SSL hostname")
     
-    @validator("cert_file", "key_file", "ca_file")
+    @field_validator("cert_file", "key_file", "ca_file")
     @classmethod
     def validate_ssl_files(cls, v: Optional[Path]) -> Optional[Path]:
         """Validate SSL file paths exist if specified.
@@ -184,31 +180,23 @@ class SSLConfig(BaseConfig):
             raise ValidationError(f"SSL file not found: {v}")
         return v
     
-    @root_validator
-    @classmethod
-    def validate_ssl_configuration(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+    @model_validator(mode='after')
+    def validate_ssl_configuration(self) -> 'SSLConfig':
         """Validate SSL configuration consistency.
         
-        Args:
-            values: Configuration values
-            
         Returns:
-            Validated configuration values
+            Validated configuration
             
         Raises:
             ValidationError: If configuration is inconsistent
         """
-        enabled = values.get("enabled", True)
-        cert_file = values.get("cert_file")
-        key_file = values.get("key_file")
-        
-        if enabled and cert_file and not key_file:
+        if self.enabled and self.cert_file and not self.key_file:
             raise ValidationError("SSL key file required when certificate is provided")
         
-        if enabled and key_file and not cert_file:
+        if self.enabled and self.key_file and not self.cert_file:
             raise ValidationError("SSL certificate file required when key is provided")
         
-        return values
+        return self
 
 
 class PoolConfig(BaseConfig):
@@ -232,14 +220,14 @@ class PoolConfig(BaseConfig):
     pool_recycle: PositiveInt = Field(3600, description="Pool recycle time in seconds")
     pool_pre_ping: bool = Field(True, description="Enable pool pre-ping")
     
-    @validator("max_size")
+    @field_validator("max_size")
     @classmethod
-    def validate_max_size(cls, v: int, values: Dict[str, Any]) -> int:
+    def validate_max_size(cls, v: int, info) -> int:
         """Ensure max_size >= min_size.
         
         Args:
             v: max_size value
-            values: All configuration values
+            info: Validation info containing other field values
             
         Returns:
             Validated max_size
@@ -247,7 +235,8 @@ class PoolConfig(BaseConfig):
         Raises:
             ValidationError: If max_size < min_size
         """
-        min_size = values.get("min_size", 1)
+        # Get min_size from the data being validated
+        min_size = info.data.get("min_size", 1) if info.data else 1
         if v < min_size:
             raise ValidationError(f"max_size ({v}) must be >= min_size ({min_size})")
         return v
@@ -270,7 +259,7 @@ class CredentialConfig(BaseConfig):
     auth_source: Optional[str] = Field(None, description="Authentication source")
     auth_mechanism: Optional[str] = Field(None, description="Authentication mechanism")
     
-    @validator("username")
+    @field_validator("username")
     @classmethod
     def validate_username(cls, v: str) -> str:
         """Validate username format.
@@ -336,7 +325,7 @@ class DatabaseConfig(BaseConfig):
     query_timeout: PositiveInt = Field(300, description="Query timeout in seconds")
     options: Dict[str, Any] = Field(default_factory=dict, description="Additional options")
     
-    @validator("id")
+    @field_validator("id")
     @classmethod
     def validate_id(cls, v: str) -> str:
         """Validate database ID format.
@@ -354,7 +343,7 @@ class DatabaseConfig(BaseConfig):
             raise ValidationError(f"Invalid database ID format: {v}")
         return v
     
-    @validator("host")
+    @field_validator("host")
     @classmethod
     def validate_host(cls, v: str) -> str:
         """Validate host format.
@@ -372,7 +361,7 @@ class DatabaseConfig(BaseConfig):
             raise ValidationError("Host cannot be empty")
         return v.strip()
     
-    @validator("database")
+    @field_validator("database")
     @classmethod
     def validate_database(cls, v: str) -> str:
         """Validate database name format.
@@ -445,7 +434,7 @@ class LoggingConfig(BaseConfig):
     structured: bool = Field(True, description="Enable structured logging")
     filters: Dict[str, str] = Field(default_factory=dict, description="Log filters")
     
-    @validator("file_path")
+    @field_validator("file_path")
     @classmethod
     def validate_log_file_path(cls, v: Optional[Path]) -> Optional[Path]:
         """Validate log file path is writable.
@@ -495,7 +484,7 @@ class SecurityConfig(BaseConfig):
     allowed_hosts: List[str] = Field(default_factory=list, description="Allowed hosts")
     cors_origins: List[str] = Field(default_factory=list, description="CORS origins")
     
-    @validator("secret_key")
+    @field_validator("secret_key")
     @classmethod
     def validate_secret_key(cls, v: SecretStr) -> SecretStr:
         """Validate secret key strength.
@@ -568,7 +557,7 @@ class SystemConfig(BaseConfig):
     """
     
     app_name: str = Field("TuningFork", description="Application name")
-    version: constr(regex=r"^\d+\.\d+\.\d+") = Field(..., description="Application version")
+    version: constr(pattern=r"^\d+\.\d+\.\d+") = Field(..., description="Application version")
     environment: Literal["development", "staging", "production"] = Field(
         "development", description="Deployment environment"
     )
@@ -585,7 +574,7 @@ class SystemConfig(BaseConfig):
         default_factory=dict, description="Plugin configurations"
     )
     
-    @validator("environment")
+    @field_validator("environment")
     @classmethod
     def validate_environment(cls, v: str) -> str:
         """Validate environment setting.
@@ -598,7 +587,7 @@ class SystemConfig(BaseConfig):
         """
         return v.lower()
     
-    @validator("databases")
+    @field_validator("databases")
     @classmethod
     def validate_databases(cls, v: Dict[str, DatabaseConfig]) -> Dict[str, DatabaseConfig]:
         """Validate database configurations.
@@ -620,33 +609,25 @@ class SystemConfig(BaseConfig):
         
         return v
     
-    @root_validator
-    @classmethod
-    def validate_environment_specific_settings(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+    @model_validator(mode='after')
+    def validate_environment_specific_settings(self) -> 'SystemConfig':
         """Validate environment-specific configuration.
         
-        Args:
-            values: Configuration values
-            
         Returns:
-            Validated configuration values
+            Validated configuration
             
         Raises:
             ValidationError: If configuration is invalid for environment
         """
-        environment = values.get("environment", "development")
-        debug = values.get("debug", False)
-        security = values.get("security")
-        
         # Production environment validations
-        if environment == "production":
-            if debug:
+        if self.environment == "production":
+            if self.debug:
                 raise ValidationError("Debug mode cannot be enabled in production")
             
-            if security and not security.require_ssl:
+            if not self.security.require_ssl:
                 raise ValidationError("SSL must be required in production environment")
         
-        return values
+        return self
     
     def get_database_config(self, database_id: str) -> Optional[DatabaseConfig]:
         """Get database configuration by ID.

@@ -224,7 +224,7 @@ class LoggerFactory:
         )
         
         self._structlog_configured = True
-    
+        
     def get_logger(
         self, 
         name: str,
@@ -246,8 +246,12 @@ class LoggerFactory:
         if not self.initialized:
             self._configure_logging_system()
         
-        # Check cache first
-        cache_key = f"{name}_{level}_{enable_correlation}"
+        # Create proper cache key with all parameters
+        # Convert None values to strings for consistent cache keys
+        level_str = level if level is not None else "None"
+        correlation_str = str(enable_correlation) if enable_correlation is not None else "None"
+        cache_key = f"{name}_{level_str}_{correlation_str}"
+        
         if cache_key in self._loggers:
             return self._loggers[cache_key]
         

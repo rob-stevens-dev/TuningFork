@@ -59,8 +59,10 @@ class TimingMetrics:
             success: Whether operation succeeded
             error: Error message if failed
         """
-        self.end_time = time.perf_counter()
-        self.duration = self.end_time - self.start_time
+        if self.end_time is None:
+            self.end_time = time.perf_counter()
+        if self.duration is None:
+            self.duration = self.end_time - self.start_time
         self.success = success
         self.error = error
     
@@ -80,7 +82,7 @@ class TimingMetrics:
         Returns:
             True if timing has been completed
         """
-        return self.end_time is not None
+        return self.end_time is not None and self.duration is not None
 
 
 @dataclass 

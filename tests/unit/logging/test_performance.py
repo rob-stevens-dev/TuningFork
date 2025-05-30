@@ -145,26 +145,32 @@ class TestPerformanceMetrics:
         assert metrics.errors[0] == "Test error"
     
     def test_multiple_timings_statistics(self):
-        """Test statistics calculation with multiple timings."""
-        metrics = PerformanceMetrics("test_op")
-        
-        # Add multiple timings with exact durations
-        durations = [0.1, 0.2, 0.15, 0.3, 0.05]
-        
-        for duration in durations:
-            timing = TimingMetrics("test_op", time.perf_counter())
-            # Use exact timing instead of sleep to avoid timing issues
-            timing.end_time = timing.start_time + duration
-            timing.duration = duration
-            timing.complete(success=True)
-            metrics.add_timing(timing)
-        
-        assert metrics.total_calls == 5
-        assert metrics.successful_calls == 5
-        assert metrics.min_duration == 0.05
-        assert metrics.max_duration == 0.3
-        assert abs(metrics.avg_duration - 0.16) < 0.01
-        assert metrics.median_duration == 0.15
+            """Test statistics calculation with multiple timings."""
+            metrics = PerformanceMetrics("test_op")
+            
+            # Add multiple timings with controlled durations
+            durations = [0.05, 0.1, 0.08, 0.15, 0.02]
+            
+            for duration in durations:
+                timing = TimingMetrics("test_op", time.perf_counter())
+                # Set exact timing to avoid measurement overhead
+                timing.end_time = timing.start_time + duration
+                timing.duration = duration
+                timing.success = True
+                timing.error = None
+                
+                metrics.add_timing(timing)
+            
+            assert metrics.total_calls == 5
+            assert metrics.successful_calls == 5
+            # Use approximate comparisons to handle floating point precision
+            assert abs(metrics.min_duration - 0.02) < 0.001
+            assert abs(metrics.max_duration - 0.15) < 0.001
+            assert abs(metrics.avg_duration - 0.08) < 0.01  # Average of durations
+            
+            # Sort durations for median calculation: [0.02, 0.05, 0.08, 0.1, 0.15]
+            # Median should be 0.08 (middle value)
+            assert abs(metrics.median_duration - 0.08) < 0.001
     
     def test_percentile_calculations(self):
         """Test percentile calculations with sufficient data."""

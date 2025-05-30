@@ -20,16 +20,6 @@ structlog.configure(
     cache_logger_on_first_use=True,
 )
 
-
-@pytest.fixture(scope="session")
-def event_loop():
-    """Create event loop for async tests."""
-    policy = asyncio.get_event_loop_policy()
-    loop = policy.new_event_loop()
-    yield loop
-    loop.close()
-
-
 @pytest.fixture
 def temp_dir() -> Generator[Path, None, None]:
     """Provide temporary directory for test files."""

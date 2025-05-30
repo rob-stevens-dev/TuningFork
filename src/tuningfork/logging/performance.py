@@ -193,7 +193,9 @@ class PerformanceMetrics:
         Returns:
             Error rate (0-100)
         """
-        return 100.0 - self.success_rate
+        if self.total_calls == 0:
+            return 0.0  # Changed from: return 100.0 - self.success_rate
+        return (self.failed_calls / self.total_calls) * 100
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert metrics to dictionary.

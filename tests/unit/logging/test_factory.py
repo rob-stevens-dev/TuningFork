@@ -1,4 +1,236 @@
-# Change level for all loggers
+"""Tests for logging factory module."""
+
+import logging
+import tempfile
+from pathlib import Path
+from unittest.mock import Mock, patch
+
+import pytest
+
+from tuningfork.logging.factory import (
+    LoggerFactory,
+    LoggerConfig,
+    get_logger,
+    configure_logging,
+    get_factory,
+)
+from tuningfork.logging.structured import StructuredLogger
+from tuningfork.logging.performance import PerformanceLogger
+from tuningfork.logging.audit import AuditLogger
+from tuningfork.config.models import LoggingConfig
+
+
+class TestLoggerConfig:
+    """Test cases for LoggerConfig class."""
+    
+    def test_logger_config_defaults(self):
+        """Test LoggerConfig default values."""
+        config = LoggerConfig()
+        
+        assert config.level == "INFO"
+        assert config.format == "json"
+        assert config.console_output is True
+        assert config.file_output is False
+        assert config.file_path is None
+        assert config.max_file_size == 10485760  # 10MB
+        assert config.backup_count == 5
+        assert config.structured is True
+        assert config.performance_tracking is False
+        assert config.audit_logging is False
+        assert config.correlation_ids is True
+    
+    def test_logger_config_custom_values(self):
+        """Test LoggerConfig with custom values."""
+        config = LoggerConfig(
+            level="DEBUG",
+            format="text",
+            console_output=False,
+            file_output=True,
+            file_path="/var/log/test.log",
+            max_file_size=5242880,  # 5MB
+            backup_count=3,
+            structured=False,
+            performance_tracking=True,
+            audit_logging=True,
+            correlation_ids=False
+        )
+        
+        assert config.level == "DEBUG"
+        assert config.format == "text"
+        assert config.console_output is False
+        assert config.file_output is True
+        assert config.file_path == "/var/log/test.log"
+        assert config.max_file_size == 5242880
+        assert config.backup_count == 3
+        assert config.structured is False
+        assert config.performance_tracking is True
+        assert config.audit_logging is True
+        assert config.correlation_ids is False
+
+
+class TestLoggerFactory:
+    """Test cases for LoggerFactory class."""
+    
+    def test_factory_initialization(self):
+        """Test LoggerFactory initializes correctly."""
+        factory = LoggerFactory()
+        
+        assert isinstance(factory.config, LoggerConfig)
+        assert factory.initialized is False
+        assert len(factory._loggers) == 0
+        assert len(factory._performance_loggers) == 0
+        assert len(factory._audit_loggers) == 0
+    
+    def test_factory_with_custom_config(self):
+        """Test LoggerFactory with custom config."""
+        custom_config = LoggerConfig(level="DEBUG", format="text")
+        factory = LoggerFactory(custom_config)
+        
+        assert factory.config.level == "DEBUG"
+        assert factory.config.format == "text"
+    
+    def test_configure_from_dict(self):
+        """Test configuring factory from dictionary."""
+        factory = LoggerFactory()
+        
+        config_dict = {
+            "level": "DEBUG",
+            "format": "text",
+            "console_output": False,
+            "file_output": True,
+            "file_path": "/tmp/test.log",
+            "invalid_key": "should_be_ignored"  # Invalid keys should be filtered
+        }
+        
+        factory.configure_from_dict(config_dict)
+        
+        assert factory.config.level == "DEBUG"
+        assert factory.config.format == "text"
+        assert factory.config.console_output is False
+        assert factory.config.file_output is True
+        assert factory.config.file_path == "/tmp/test.log"
+        assert factory.initialized is True
+    
+    def test_configure_from_logging_config(self):
+        """Test configuring factory from LoggingConfig."""
+        with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as temp_file:
+            temp_path = Path(temp_file.name)
+        
+        try:
+            logging_config = LoggingConfig(
+                level="WARNING",
+                format="json",
+                file_path=temp_path,
+                max_file_size=5242880,
+                backup_count=3,
+                console_output=False,
+                structured=True
+            )
+            
+            factory = LoggerFactory()
+            factory.configure_from_config(logging_config)
+            
+            assert factory.config.level == "WARNING"
+            assert factory.config.format == "json"
+            assert factory.config.file_output is True
+            assert factory.config.file_path == str(temp_path)
+            assert factory.config.max_file_size == 5242880
+            assert factory.config.backup_count == 3
+            assert factory.config.console_output is False
+            assert factory.config.structured is True
+            assert factory.initialized is True
+        
+        finally:
+            # Clean up temp file
+            temp_path.unlink(missing_ok=True)
+    
+    def test_get_logger_caching(self):
+        """Test logger caching in factory."""
+        factory = LoggerFactory()
+        
+        # Get logger twice with same parameters
+        logger1 = factory.get_logger("test.logger")
+        logger2 = factory.get_logger("test.logger")
+        
+        # Should return same instance
+        assert logger1 is logger2
+        assert isinstance(logger1, StructuredLogger)
+        assert logger1.name == "test.logger"
+    
+    def test_get_logger_different_params(self):
+        """Test getting loggers with different parameters."""
+        factory = LoggerFactory()
+        
+        # Get loggers with different parameters
+        logger1 = factory.get_logger("test.logger", level="INFO")
+        logger2 = factory.get_logger("test.logger", level="DEBUG")
+        
+        # Should return different instances due to different cache keys
+        assert logger1 is not logger2  # This should pass
+        assert logger1.get_level() == "INFO"
+        assert logger2.get_level() == "DEBUG"
+    
+    def test_get_performance_logger(self):
+        """Test getting performance logger."""
+        factory = LoggerFactory()
+        
+        perf_logger = factory.get_performance_logger("perf_test")
+        
+        assert isinstance(perf_logger, PerformanceLogger)
+        assert perf_logger.name == "perf_test"
+    
+    def test_get_performance_logger_caching(self):
+        """Test performance logger caching."""
+        factory = LoggerFactory()
+        
+        # Get same performance logger twice
+        logger1 = factory.get_performance_logger("perf_test")
+        logger2 = factory.get_performance_logger("perf_test")
+        
+        # Should return same instance
+        assert logger1 is logger2
+    
+    def test_get_audit_logger(self):
+        """Test getting audit logger."""
+        factory = LoggerFactory()
+        
+        audit_logger = factory.get_audit_logger("audit_test")
+        
+        assert isinstance(audit_logger, AuditLogger)
+        assert audit_logger.name == "audit_test"
+    
+    def test_get_audit_logger_with_compliance(self):
+        """Test getting audit logger with compliance mode."""
+        factory = LoggerFactory()
+        
+        audit_logger = factory.get_audit_logger(
+            "compliance_test",
+            compliance_mode=True,
+            default_retention_days=365
+        )
+        
+        assert audit_logger.compliance_mode is True
+        assert audit_logger.default_retention_days == 365
+    
+    def test_set_level_specific_logger(self):
+        """Test setting level for specific logger."""
+        factory = LoggerFactory()
+        
+        logger = factory.get_logger("test.logger", level="INFO")
+        assert logger.get_level() == "INFO"
+        
+        # Change level for specific logger
+        factory.set_level("DEBUG", "test.logger")
+        assert logger.get_level() == "DEBUG"
+    
+    def test_set_level_all_loggers(self):
+        """Test setting level for all loggers."""
+        factory = LoggerFactory()
+        
+        logger1 = factory.get_logger("logger1", level="INFO")
+        logger2 = factory.get_logger("logger2", level="WARNING")
+        
+        # Change level for all loggers
         factory.set_level("ERROR")
         
         assert factory.config.level == "ERROR"
@@ -300,263 +532,4 @@ class TestLoggerFactoryPerformance:
         
         # Should end with last configuration
         assert factory.config.level == "ERROR"
-        assert factory.config.format == "text" and test
-            logger = factory.get_logger("integration.test")
-            logger.info("Integration test message", test_param="test_value")
-            
-            assert factory.initialized is True
-            assert logger.name == "integration.test"
-            
-        finally:
-            temp_path.unlink(missing_ok=True)
-    
-    def test_file_logging_integration(self):
-        """Test file logging integration."""
-        with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as temp_file:
-            temp_path = Path(temp_file.name)
-        
-        try:
-            # Configure for file output
-            factory = LoggerFactory()
-            factory.configure_from_dict({
-                "level": "INFO",
-                "format": "text",
-                "console_output": False,
-                "file_output": True,
-                "file_path": str(temp_path)
-            })
-            
-            # Create logger"""Tests for logging factory module."""
-
-import logging
-import tempfile
-from pathlib import Path
-from unittest.mock import Mock, patch
-
-import pytest
-
-from tuningfork.logging.factory import (
-    LoggerFactory,
-    LoggerConfig,
-    get_logger,
-    configure_logging,
-    get_factory,
-)
-from tuningfork.logging.structured import StructuredLogger
-from tuningfork.logging.performance import PerformanceLogger
-from tuningfork.logging.audit import AuditLogger
-from tuningfork.config.models import LoggingConfig
-
-
-class TestLoggerConfig:
-    """Test cases for LoggerConfig class."""
-    
-    def test_logger_config_defaults(self):
-        """Test LoggerConfig default values."""
-        config = LoggerConfig()
-        
-        assert config.level == "INFO"
-        assert config.format == "json"
-        assert config.console_output is True
-        assert config.file_output is False
-        assert config.file_path is None
-        assert config.max_file_size == 10485760  # 10MB
-        assert config.backup_count == 5
-        assert config.structured is True
-        assert config.performance_tracking is False
-        assert config.audit_logging is False
-        assert config.correlation_ids is True
-    
-    def test_logger_config_custom_values(self):
-        """Test LoggerConfig with custom values."""
-        config = LoggerConfig(
-            level="DEBUG",
-            format="text",
-            console_output=False,
-            file_output=True,
-            file_path="/var/log/test.log",
-            max_file_size=5242880,  # 5MB
-            backup_count=3,
-            structured=False,
-            performance_tracking=True,
-            audit_logging=True,
-            correlation_ids=False
-        )
-        
-        assert config.level == "DEBUG"
-        assert config.format == "text"
-        assert config.console_output is False
-        assert config.file_output is True
-        assert config.file_path == "/var/log/test.log"
-        assert config.max_file_size == 5242880
-        assert config.backup_count == 3
-        assert config.structured is False
-        assert config.performance_tracking is True
-        assert config.audit_logging is True
-        assert config.correlation_ids is False
-
-
-class TestLoggerFactory:
-    """Test cases for LoggerFactory class."""
-    
-    def test_factory_initialization(self):
-        """Test LoggerFactory initializes correctly."""
-        factory = LoggerFactory()
-        
-        assert isinstance(factory.config, LoggerConfig)
-        assert factory.initialized is False
-        assert len(factory._loggers) == 0
-        assert len(factory._performance_loggers) == 0
-        assert len(factory._audit_loggers) == 0
-    
-    def test_factory_with_custom_config(self):
-        """Test LoggerFactory with custom config."""
-        custom_config = LoggerConfig(level="DEBUG", format="text")
-        factory = LoggerFactory(custom_config)
-        
-        assert factory.config.level == "DEBUG"
         assert factory.config.format == "text"
-    
-    def test_configure_from_dict(self):
-        """Test configuring factory from dictionary."""
-        factory = LoggerFactory()
-        
-        config_dict = {
-            "level": "DEBUG",
-            "format": "text",
-            "console_output": False,
-            "file_output": True,
-            "file_path": "/tmp/test.log",
-            "invalid_key": "should_be_ignored"  # Invalid keys should be filtered
-        }
-        
-        factory.configure_from_dict(config_dict)
-        
-        assert factory.config.level == "DEBUG"
-        assert factory.config.format == "text"
-        assert factory.config.console_output is False
-        assert factory.config.file_output is True
-        assert factory.config.file_path == "/tmp/test.log"
-        assert factory.initialized is True
-    
-    def test_configure_from_logging_config(self):
-        """Test configuring factory from LoggingConfig."""
-        with tempfile.NamedTemporaryFile(suffix=".log", delete=False) as temp_file:
-            temp_path = Path(temp_file.name)
-        
-        try:
-            logging_config = LoggingConfig(
-                level="WARNING",
-                format="json",
-                file_path=temp_path,
-                max_file_size=5242880,
-                backup_count=3,
-                console_output=False,
-                structured=True
-            )
-            
-            factory = LoggerFactory()
-            factory.configure_from_config(logging_config)
-            
-            assert factory.config.level == "WARNING"
-            assert factory.config.format == "json"
-            assert factory.config.file_output is True
-            assert factory.config.file_path == str(temp_path)
-            assert factory.config.max_file_size == 5242880
-            assert factory.config.backup_count == 3
-            assert factory.config.console_output is False
-            assert factory.config.structured is True
-            assert factory.initialized is True
-        
-        finally:
-            # Clean up temp file
-            temp_path.unlink(missing_ok=True)
-    
-    def test_get_logger_caching(self):
-        """Test logger caching in factory."""
-        factory = LoggerFactory()
-        
-        # Get logger twice with same parameters
-        logger1 = factory.get_logger("test.logger")
-        logger2 = factory.get_logger("test.logger")
-        
-        # Should return same instance
-        assert logger1 is logger2
-        assert isinstance(logger1, StructuredLogger)
-        assert logger1.name == "test.logger"
-    
-    def test_get_logger_different_params(self):
-        """Test getting loggers with different parameters."""
-        factory = LoggerFactory()
-        
-        # Get loggers with different parameters
-        logger1 = factory.get_logger("test.logger", level="INFO")
-        logger2 = factory.get_logger("test.logger", level="DEBUG")
-        
-        # Should return different instances
-        assert logger1 is not logger2
-        assert logger1.get_level() == "INFO"
-        assert logger2.get_level() == "DEBUG"
-    
-    def test_get_performance_logger(self):
-        """Test getting performance logger."""
-        factory = LoggerFactory()
-        
-        perf_logger = factory.get_performance_logger("perf_test")
-        
-        assert isinstance(perf_logger, PerformanceLogger)
-        assert perf_logger.name == "perf_test"
-    
-    def test_get_performance_logger_caching(self):
-        """Test performance logger caching."""
-        factory = LoggerFactory()
-        
-        # Get same performance logger twice
-        logger1 = factory.get_performance_logger("perf_test")
-        logger2 = factory.get_performance_logger("perf_test")
-        
-        # Should return same instance
-        assert logger1 is logger2
-    
-    def test_get_audit_logger(self):
-        """Test getting audit logger."""
-        factory = LoggerFactory()
-        
-        audit_logger = factory.get_audit_logger("audit_test")
-        
-        assert isinstance(audit_logger, AuditLogger)
-        assert audit_logger.name == "audit_test"
-    
-    def test_get_audit_logger_with_compliance(self):
-        """Test getting audit logger with compliance mode."""
-        factory = LoggerFactory()
-        
-        audit_logger = factory.get_audit_logger(
-            "compliance_test",
-            compliance_mode=True,
-            default_retention_days=365
-        )
-        
-        assert audit_logger.compliance_mode is True
-        assert audit_logger.default_retention_days == 365
-    
-    def test_set_level_specific_logger(self):
-        """Test setting level for specific logger."""
-        factory = LoggerFactory()
-        
-        logger = factory.get_logger("test.logger", level="INFO")
-        assert logger.get_level() == "INFO"
-        
-        # Change level for specific logger
-        factory.set_level("DEBUG", "test.logger")
-        assert logger.get_level() == "DEBUG"
-    
-    def test_set_level_all_loggers(self):
-        """Test setting level for all loggers."""
-        factory = LoggerFactory()
-        
-        logger1 = factory.get_logger("logger1", level="INFO")
-        logger2 = factory.get_logger("logger2", level="WARNING")
-        
-        # Change level for all loggers
-        factory.set_level("ERROR")

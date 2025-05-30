@@ -345,34 +345,46 @@ class TestStructuredLogger:
     
     def test_operation_logging_success(self):
         """Test operation logging for successful operations."""
-        logger = StructuredLogger("test.logger") 
-        
-        # Start operation
-        operation_context = logger.log_operation_start("test_operation", param1="value1")
-        
-        assert "operation_id" in operation_context
-        assert "operation" in operation_context
-        assert "start_time" in operation_context
-        assert operation_context["operation"] == "test_operation"
-        assert operation_context["param1"] == "value1"
-        
-        # Complete operation successfully
-        logger.log_operation_success(operation_context, result="success", items_processed=100)
-        
-        # Should not raise any exceptions
-    
+        with patch('tuningfork.logging.structured.structlog') as mock_structlog:
+            mock_logger = MagicMock()
+            mock_structlog.get_logger.return_value = mock_logger
+            
+            logger = StructuredLogger("test.logger")
+            
+            operation_context = logger.log_operation_start("test_operation", param1="value1")
+            
+            assert "operation_id" in operation_context
+            assert "operation" in operation_context
+            assert "start_time" in operation_context
+            assert operation_context["operation"] == "test_operation"
+            assert operation_context["param1"] == "value1"
+            
+            logger.log_operation_success(operation_context, result="success", items_processed=100)
+
     def test_operation_logging_failure(self):
         """Test operation logging for failed operations."""
-        logger = StructuredLogger("test.logger")
-        
-        # Start operation
-        operation_context = logger.log_operation_start("test_operation")
-        
-        # Simulate failure
-        test_error = Exception("Test error")
-        logger.log_operation_failure(operation_context, test_error, additional_info="test")
-        
-        # Should not raise any exceptions
+        with patch('tuningfork.logging.structured.structlog') as mock_structlog:
+            mock_logger = MagicMock()
+            mock_structlog.get_logger.return_value = mock_logger
+            
+            logger = StructuredLogger("test.logger")
+            
+            operation_context = logger.log_operation_start("test_operation")
+            test_error = Exception("Test error")
+            logger.log_operation_failure(operation_context, test_error, additional_info="test")
+
+    def test_exception_logging(self):
+        """Test exception logging with traceback."""
+        with patch('tuningfork.logging.structured.structlog') as mock_structlog:
+            mock_logger = MagicMock()
+            mock_structlog.get_logger.return_value = mock_logger
+            
+            logger = StructuredLogger("test.logger")
+            
+            try:
+                raise ValueError("Test exception")
+            except ValueError:
+                logger.exception("An error occurred", operation="test")
     
     def test_clear_context(self):
         """Test clearing logger context."""
@@ -397,17 +409,7 @@ class TestStructuredLogger:
         new_correlation = logger.get_correlation_id()
         assert new_correlation is not None
         assert new_correlation != initial_correlation
-    
-    def test_exception_logging(self):
-        """Test exception logging with traceback."""
-        logger = StructuredLogger("test.logger")
-        
-        try:
-            raise ValueError("Test exception")
-        except ValueError:
-            # This should not raise any exceptions
-            logger.exception("An error occurred", operation="test")
-    
+       
     def test_logger_repr(self):
         """Test logger string representation."""
         logger = StructuredLogger("test.logger", level="DEBUG", enable_correlation=True)

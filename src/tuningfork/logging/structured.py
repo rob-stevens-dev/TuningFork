@@ -385,8 +385,7 @@ class StructuredLogger:
         event_dict = self._prepare_event_dict(
             message=message, 
             level="error", 
-            exc_info=exc_info,
-            **kwargs
+            **kwargs  # Removed exc_info from here
         )
         self._logger.error(message, exc_info=exc_info, **event_dict)
     

@@ -161,12 +161,13 @@ class TestLoggerFactory:
         """Test getting loggers with different parameters."""
         factory = LoggerFactory()
         
-        # Get loggers with different parameters
+        # Get loggers with different parameters - they should be different instances
         logger1 = factory.get_logger("test.logger", level="INFO")
         logger2 = factory.get_logger("test.logger", level="DEBUG")
         
         # Should return different instances due to different cache keys
-        assert logger1 is not logger2  # This should pass
+        assert logger1 is not logger2
+        # Both should have their specified levels
         assert logger1.get_level() == "INFO"
         assert logger2.get_level() == "DEBUG"
     

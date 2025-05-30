@@ -248,17 +248,18 @@ class LoggerFactory:
         
         # Create proper cache key with all parameters
         # Convert None values to strings for consistent cache keys
-        level_str = level if level is not None else "None"
-        correlation_str = str(enable_correlation) if enable_correlation is not None else "None"
+        level_str = level if level is not None else "default"
+        correlation_str = str(enable_correlation) if enable_correlation is not None else "default"
         cache_key = f"{name}_{level_str}_{correlation_str}"
         
         if cache_key in self._loggers:
             return self._loggers[cache_key]
         
-        # Create new logger
+        # Create new logger with proper level
+        effective_level = level or self.config.level
         logger = StructuredLogger(
             name=name,
-            level=level or self.config.level,
+            level=effective_level,
             enable_correlation=enable_correlation if enable_correlation is not None else self.config.correlation_ids,
         )
         
